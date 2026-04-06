@@ -3,7 +3,6 @@ import json
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from recon import run_recon
 
 app = FastAPI(title="Recon SaaS", version="1.0.0")
@@ -32,4 +31,4 @@ async def recon_ws(websocket: WebSocket, domain: str):
     finally:
         await websocket.close()
 
-app.mount("/", StaticFiles(directory="../frontend", html=True), name="frontend")
+app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
