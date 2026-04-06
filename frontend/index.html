@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Recon SaaS — Bug Bounty Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen font-mono">
+
+  <div class="max-w-5xl mx-auto px-6 py-10">
+
+    <!-- Header -->
+    <div class="mb-8">
+      <h1 class="text-3xl font-bold text-green-400">🔍 Recon SaaS</h1>
+      <p class="text-gray-400 mt-1">Subdomain enumeration + HTTP probing for Bug Bounty</p>
+    </div>
+
+    <!-- Input -->
+    <div class="flex gap-3 mb-8">
+      <input id="domain" type="text" placeholder="target.com"
+        class="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-green-400" />
+      <button onclick="startRecon()"
+        class="bg-green-500 hover:bg-green-400 text-black font-bold px-6 py-3 rounded-lg transition">
+        Run Recon
+      </button>
+      <button onclick="exportJSON()"
+        class="bg-gray-700 hover:bg-gray-600 text-white px-6 py-3 rounded-lg transition">
+        Export JSON
+      </button>
+    </div>
+
+    <!-- Stats -->
+    <div class="grid grid-cols-3 gap-4 mb-8">
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 text-center">
+        <div id="stat-resolved" class="text-2xl font-bold text-green-400">0</div>
+        <div class="text-gray-400 text-sm mt-1">Resolved</div>
+      </div>
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 text-center">
+        <div id="stat-alive" class="text-2xl font-bold text-blue-400">0</div>
+        <div class="text-gray-400 text-sm mt-1">Alive</div>
+      </div>
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 text-center">
+        <div id="stat-status" class="text-2xl font-bold text-yellow-400">Idle</div>
+        <div class="text-gray-400 text-sm mt-1">Status</div>
+      </div>
+    </div>
+
+    <!-- Log -->
+    <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 mb-6">
+      <div class="text-green-400 text-sm mb-2">// Live Output</div>
+      <div id="log" class="h-48 overflow-y-auto text-xs text-gray-300 space-y-1"></div>
+    </div>
+
+    <!-- Results Table -->
+    <div class="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-800 text-gray-400">
+          <tr>
+            <th class="text-left px-4 py-3">Subdomain</th>
+            <th class="text-left px-4 py-3">IP</th>
+            <th class="text-left px-4 py-3">URL</th>
+            <th class="text-left px-4 py-3">Status</th>
+            <th class="text-left px-4 py-3">Alive</th>
+          </tr>
+        </thead>
+        <tbody id="results"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    let ws = null;
+    let results = [];
+    let resolvedCount = 0;
+    let aliveCount = 0;
+    const resolvedMap = {};
+
+    function log(msg, color = "text-gray-400") {
+      const el = document.getElementById("log");
+      const line = document.createElement("div");
+      line.className = color;
+      line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      el.appendChild(line);
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function startRecon() {
+      const domain = document.getElementById("domain").value.trim();
+      if (!domain) return alert("Enter a domain.");
+      if (ws) ws.close();
+
+      results = []; resolvedCount = 0; aliveCount = 0;
+      document.getElementById("results").innerHTML = "";
+      document.getElementById("log").innerHTML = "";
+      document.getElementById("stat-resolved").textContent = "0";
+      document.getElementById("stat-alive").textContent = "0";
+      document.getElementById("stat-status").textContent = "Running";
+
+      const host = window.location.hostname;
+      ws = new WebSocket(`ws://${host}:8000/ws/recon/${domain}`);
+
+      ws.onmessage = (e) => {
+        const event = JSON.parse(e.data);
+        if (event.type === "resolved") {
+          resolvedCount++;
+          resolvedMap[event.data.subdomain] = event.data;
+          document.getElementById("stat-resolved").textContent = resolvedCount;
+          log(`[+] Resolved: ${event.data.subdomain} → ${event.data.ip}`, "text-green-400");
+          addRow(event.data.subdomain, event.data.ip, null, null, null);
+        } else if (event.type === "probed") {
+          if (event.data.alive) aliveCount++;
+          document.getElementById("stat-alive").textContent = aliveCount;
+          updateRow(event.data);
+          const ip = resolvedMap[event.data.subdomain]?.ip || "-";
+          results.push({ ...event.data, ip });
+          if (event.data.alive)
+            log(`[HTTP] ${event.data.url} → ${event.data.status_code}`, "text-blue-400");
+        } else if (event.type === "done") {
+          document.getElementById("stat-status").textContent = "Done ✓";
+          log(`[*] Recon complete. Total resolved: ${event.data.total}`, "text-yellow-400");
+        } else if (event.type === "error") {
+          log(`[!] Error: ${event.data.message}`, "text-red-400");
+        }
+      };
+
+      ws.onclose = () => log("[*] WebSocket closed.", "text-gray-500");
+    }
+
+    function addRow(subdomain, ip, url, status, alive) {
+      const tbody = document.getElementById("results");
+      const tr = document.createElement("tr");
+      tr.id = `row-${subdomain.replace(/\./g, "-")}`;
+      tr.className = "border-t border-gray-800";
+      tr.innerHTML = `
+        <td class="px-4 py-2 text-green-300">${subdomain}</td>
+        <td class="px-4 py-2 text-gray-300">${ip || "-"}</td>
+        <td class="px-4 py-2 text-blue-300" id="url-${subdomain.replace(/\./g, "-")}">-</td>
+        <td class="px-4 py-2 text-gray-300" id="sc-${subdomain.replace(/\./g, "-")}">-</td>
+        <td class="px-4 py-2" id="alive-${subdomain.replace(/\./g, "-")}">⏳</td>
+      `;
+      tbody.appendChild(tr);
+    }
+
+    function updateRow(data) {
+      const key = data.subdomain.replace(/\./g, "-");
+      const urlEl = document.getElementById(`url-${key}`);
+      const scEl = document.getElementById(`sc-${key}`);
+      const aliveEl = document.getElementById(`alive-${key}`);
+      if (urlEl) urlEl.textContent = data.url || "-";
+      if (scEl) scEl.textContent = data.status_code || "-";
+      if (aliveEl) aliveEl.textContent = data.alive ? "✅" : "❌";
+    }
+
+    function exportJSON() {
+      if (!results.length) return alert("No results to export.");
+      const blob = new Blob([JSON.stringify(results, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `recon-${Date.now()}.json`;
+      a.click();
+    }
+  </script>
+</body>
+</html>
