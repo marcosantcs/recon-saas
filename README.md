@@ -1,6 +1,6 @@
 # Recon SaaS — Bug Bounty Dashboard
 
-Real-time subdomain enumeration and HTTP probing dashboard for Bug Bounty reconnaissance.
+Real-time subdomain enumeration and HTTP probing dashboard for Attack Surface Management.
 
 ## Features
 - 🔍 Subdomain enumeration via async DNS resolution
